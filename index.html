@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="API-SAM Automatic Segmentation Tool">
+    <meta name="author" content="FETHl">
+    <title>avh-FILMS Segmentation Dashboard</title>
+    
+    <!-- Script conflict resolver needs to run first -->
+    <script>
+    // Prevent script conflicts by disabling problematic scripts
+    (function() {
+        console.log("⚠️ [SCRIPT-RESOLVER] Preventing script conflicts...");
+        
+        // List of scripts that might conflict
+        const problematicScripts = [
+            'definitive-session-contour-fix.js',
+            'contour-groups-fix.js',
+            'direct-contour-fix.js',
+            'session-id-urgent-fix.js'
+        ];
+        
+        // Override document.createElement to catch script creation
+        const originalCreateElement = document.createElement;
+        document.createElement = function(tagName) {
+            const element = originalCreateElement.call(document, tagName);
+            
+            if (tagName.toLowerCase() === 'script') {
+                const originalSetAttribute = element.setAttribute;
+                element.setAttribute = function(name, value) {
+                    if (name === 'src') {
+                        for (const script of problematicScripts) {
+                            if (value.includes(script)) {
+                                console.warn(`⚠️ [SCRIPT-RESOLVER] Prevented loading: ${value}`);
+                                return; // Don't set the src attribute
+                            }
+                        }
+                    }
+                    return originalSetAttribute.call(this, name, value);
+                };
+            }
+            
+            return element;
+        };
+        
+        console.log("⚠️ [SCRIPT-RESOLVER] Script conflict prevention active");
+    })();
+    </script>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="./css/ui-enhancements.css">
+    
+    <!-- Custom styles -->
+    <style>
+        body {
+            padding-top: 20px;
+            padding-bottom: 40px;
+            background-color: #f8f9fa;
+        }
+        
+        .header {
+            margin-bottom: 30px;
+            border-bottom: 1px solid #e5e5e5;
+            padding-bottom: 20px;
+        }
+        
+        #canvas-container {
+            position: relative;
+            margin: 0 auto;
+            border: 1px solid #ccc;
+            overflow: hidden;
+            background-color: #f0f0f0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        
+        #image-canvas {
+            z-index: 1;
+        }
+        
+        #mask-canvas {
+            z-index: 2;
+            opacity: 0.5;
+        }
+        
+        .param-slider {
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        .mask-thumbnail {
+            cursor: pointer;
+            margin: 5px;
+            border: 2px solid transparent;
+            width: 100px;
+            height: 100px;
+            object-fit: contain;
+            background-color: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .mask-thumbnail.selected {
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
+        }
+        
+        .config-panel {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        
+        .loading-overlay.active {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        .loading-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .tool-btn {
+            padding: 5px 10px;
+            margin-right: 5px;
+        }
+        
+        .tool-btn.active {
+            background-color: #0d6efd;
+            color: white;
+        }
+        
+        #mask-stats {
+            font-size: 0.9rem;
+        }
+        
+        #mask-stats table {
+            margin-bottom: 0;
+        }
+        
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .card-header {
+            background-color: rgba(0,0,0,0.02);
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+        }
+        
+        .attribution {
+            text-align: center;
+            font-size: 0.8rem;
+            color: #6c757d;
+            padding: 10px 0;
+            margin-top: 20px;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .api-status-indicator {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+            z-index: 9999;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-dot.online {
+            background-color: #28a745;
+        }
+        
+        .status-dot.offline {
+            background-color: #dc3545;
+        }
+        
+        .nav-tabs {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header d-flex align-items-center justify-content-between">
+            <h1 class="display-5">avh-FILMS Segmentation Dashboard</h1>
+            <div class="btn-group">
+                <a href="index.html" class="btn btn-outline-primary active">Home</a>
+                <a href="automatic.html" class="btn btn-outline-primary">Automatic Mode</a>
+                <a href="interactive.html" class="btn btn-outline-primary">Interactive Mode</a>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-5">
+                <!-- Session Card -->
+                <div class="card">
+                    <div class="card-header d-flex align-items-center">
+                        <h5 class="mb-0">Session & Upload</h5>
+                        <span class="badge bg-primary ms-auto" id="server-version">v1.0.0</span>
+                    </div>
+                    <div class="card-body">
+                        <button id="new-session-btn" class="btn btn-outline-primary mb-3">Create New Session</button>
+                        <div id="session-status" class="alert alert-secondary">No active session</div>
+                        
+                        <form id="upload-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="image-upload" class="form-label">Select Image</label>
+                                <input type="file" class="form-control" id="image-upload" accept="image/*" disabled>
+                            </div>
+                            <button type="submit" class="btn btn-primary" disabled id="upload-btn">Upload Image</button>
+                        </form>
+                    </div>
+                </div>
+                
+                <!-- Segmentation Parameters Card -->
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Segmentation Parameters</h5>
+                        <button class="btn btn-sm btn-outline-info" id="show-advanced-btn">Advanced Options</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="basic-params">
+                            <div class="mb-3">
+                                <label for="quality-threshold" class="form-label">
+                                    Quality Threshold: <span id="quality-value">0.8</span>
+                                </label>
+                                <input type="range" class="form-range param-slider" id="quality-threshold" 
+                                       min="0.5" max="0.98" step="0.01" value="0.8">
+                                <div class="small text-muted">Higher values produce fewer but more accurate masks</div>
+                            </div>
+                            
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="crf-toggle" checked>
+                                <label class="form-check-label" for="crf-toggle">
+                                    Apply CRF Refinement
+                                </label>
+                                <div class="small text-muted">Improves mask boundaries using Conditional Random Fields</div>
+                            </div>
+                            
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="auto-adjust" checked>
+                                <label class="form-check-label" for="auto-adjust">
+                                    Auto-adjust for image size
+                                </label>
+                                <div class="small text-muted">Automatically optimizes parameters based on image dimensions</div>
+                            </div>
+                        </div>
+                        
+                        <div class="advanced-params" style="display: none;">
+                            <div class="config-panel">
+                                <h6>Advanced Configuration</h6>
+                                
+                                <div class="mb-3">
+                                    <label for="points-per-side" class="form-label">
+                                        Points Per Side: <span id="points-value">32</span>
+                                    </label>
+                                    <input type="range" class="form-range param-slider" id="points-per-side" 
+                                           min="16" max="64" step="4" value="32">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="pred-iou-thresh" class="form-label">
+                                        Pred IoU Threshold: <span id="iou-value">0.88</span>
+                                    </label>
+                                    <input type="range" class="form-range param-slider" id="pred-iou-thresh" 
+                                           min="0.7" max="0.97" step="0.01" value="0.88">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="stability-score-thresh" class="form-label">
+                                        Stability Score Threshold: <span id="stability-value">0.95</span>
+                                    </label>
+                                    <input type="range" class="form-range param-slider" id="stability-score-thresh" 
+                                           min="0.7" max="0.97" step="0.01" value="0.95">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="min-mask-region-area" class="form-label">
+                                        Min Mask Region Area: <span id="area-value">100</span>
+                                    </label>
+                                    <input type="range" class="form-range param-slider" id="min-mask-region-area" 
+                                           min="0" max="1000" step="10" value="100">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="crop-n-layers" class="form-label">
+                                        Crop Layers: <span id="layers-value">1</span>
+                                    </label>
+                                    <input type="range" class="form-range param-slider" id="crop-n-layers" 
+                                           min="0" max="3" step="1" value="1">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="crop-n-points-downscale-factor" class="form-label">
+                                        Points Downscale Factor: <span id="downscale-value">2</span>
+                                    </label>
+                                    <input type="range" class="form-range param-slider" id="crop-n-points-downscale-factor" 
+                                           min="1" max="4" step="1" value="2">
+                                </div>
+                                
+                                <button class="btn btn-sm btn-outline-secondary" id="reset-config-btn">
+                                    Reset to Defaults
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-success" id="segment-btn" disabled>
+                                Generate Automatic Masks
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Batch Processing Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Batch Processing</h5>
+                    </div>
+                    <div class="card-body">
+                        <p>Process multiple images with the same segmentation settings.</p>
+                        
+                        <div class="mb-3">
+                            <input class="form-control" type="file" id="batch-file-input" multiple accept="image/*">
+                            <div class="form-text">Select multiple files to add to batch queue</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0">Files in batch: <span id="batch-file-count">0</span></h6>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-secondary" id="clear-batch-btn" disabled>Clear</button>
+                                    <button class="btn btn-sm btn-primary" id="start-batch-btn" disabled>Start Processing</button>
+                                </div>
+                            </div>
+                            
+                            <ul class="list-group" id="batch-files-list" style="max-height: 200px; overflow-y: auto;">
+                                <!-- Batch files will be listed here -->
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-7">
+                <!-- Canvas Container -->
+                <div id="canvas-container" style="display: none; margin-bottom: 20px;">
+                    <canvas id="image-canvas"></canvas>
+                    <canvas id="mask-canvas"></canvas>
+                </div>
+                
+                <!-- Results Card -->
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Segmentation Results</h5>
+                        <div>
+                            <span class="badge bg-primary me-2" id="mask-count">0 masks</span>
+                            <button id="comparison-mode-btn" class="btn btn-sm btn-outline-info" disabled>Compare Masks</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="processing-indicator" style="display: none;">
+                            <div class="d-flex justify-content-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Processing...</span>
+                                </div>
+                            </div>
+                            <p class="text-center mt-2">Processing image, please wait...</p>
+                        </div>
+                        
+                        <!-- Mask Groups -->
+                        <div id="mask-groups-container" class="mb-3">
+                            <!-- Mask groups will be added here -->
+                        </div>
+                        
+                        <!-- Mask Thumbnails -->
+                        <div id="masks-container" class="d-flex flex-wrap justify-content-center">
+                            <!-- Mask thumbnails will be added here -->
+                        </div>
+                        
+                        <!-- Selected Mask Stats -->
+                        <div id="mask-stats" class="mt-3" style="display: none;">
+                            <!-- Mask statistics will be added here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Mask Editor Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Mask Editor</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-3">
+                            <button class="btn btn-primary" id="edit-mask-btn" disabled>Edit Selected Mask</button>
+                            <div>
+                                <button class="btn btn-success" id="save-edit-btn" style="display: none;">Save</button>
+                                <button class="btn btn-secondary" id="cancel-edit-btn" style="display: none;">Cancel</button>
+                            </div>
+                        </div>
+                        
+                        <div id="edit-tools" style="display: none;">
+                            <div class="mb-3">
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-outline-primary active" id="add-mode-btn">Add</button>
+                                    <button type="button" class="btn btn-outline-primary" id="subtract-mode-btn">Subtract</button>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="brush-size" class="form-label">
+                                    Brush Size: <span id="brush-size-value">10</span>
+                                </label>
+                                <input type="range" class="form-range" id="brush-size" min="1" max="50" value="10">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Export Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Export Options</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="nav nav-tabs" id="exportTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basic-export" type="button" role="tab">Basic</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced-export" type="button" role="tab">Advanced</button>
+                            </li>
+                        </ul>
+                        
+                        <div class="tab-content" id="exportTabContent">
+                            <div class="tab-pane fade show active" id="basic-export" role="tabpanel">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="overlay-toggle" checked>
+                                    <label class="form-check-label" for="overlay-toggle">
+                                        Overlay on Image (PNG)
+                                    </label>
+                                </div>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="include-image-toggle">
+                                    <label class="form-check-label" for="include-image-toggle">
+                                        Include Image (SVG)
+                                    </label>
+                                </div>
+                                <div class="btn-group">
+                                    <button class="btn btn-outline-secondary" id="export-png-btn" disabled>Export PNG</button>
+                                    <button class="btn btn-outline-secondary" id="export-svg-btn" disabled>Export SVG</button>
+                                    <button class="btn btn-outline-secondary" id="export-all-btn" disabled>Export All</button>
+                                </div>
+                            </div>
+                            
+                            <div class="tab-pane fade" id="advanced-export" role="tabpanel">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="simplify-toggle">
+                                    <label class="form-check-label" for="simplify-toggle">
+                                        Simplify Contours
+                                    </label>
+                                </div>
+                                <div id="simplify-controls" style="display: none;">
+                                    <div class="mb-3">
+                                        <label for="simplify-tolerance" class="form-label">
+                                            Simplify Tolerance: <span id="simplify-value">1.0</span>
+                                        </label>
+                                        <input type="range" class="form-range param-slider" id="simplify-tolerance" 
+                                               min="0.1" max="10.0" step="0.1" value="1.0">
+                                    </div>
+                                </div>
+                                <div class="btn-group">
+                                    <button class="btn btn-outline-secondary" id="export-dxf-btn" disabled>Export DXF</button>
+                                    <button class="btn btn-outline-secondary" id="export-json-btn" disabled>Export JSON</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Display Settings Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Display Settings</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="opacity-control" class="form-label">
+                                Mask Opacity: <span id="opacity-value">0.5</span>
+                            </label>
+                            <input type="range" class="form-range" id="opacity-control" min="0.1" max="1.0" step="0.1" value="0.5">
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="color-overlay">
+                            <label class="form-check-label" for="color-overlay">
+                                Apply Color Overlay
+                            </label>
+                            <input type="color" id="custom-color-picker" value="#ff0000" class="ms-2">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="attribution">
+            API-SAM Automatic Segmentation | User: FETHl | Last Updated: 2025-04-10 08:44:06
+        </div>
+    </div>
+    
+    <!-- Loading overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-content">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <h5 id="loading-message">Processing...</h5>
+        </div>
+    </div>
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Unified contour processing solution -->
+    <script>
+    // Global session management 
+    window.SESSION = {
+        id: null,
+        currentMaskIndex: 0
+    };
+
+    // Ensure contours have valid structure before processing
+    window.ensureValidContours = function(contours) {
+        if (!Array.isArray(contours)) {
+            console.warn("[CONTOUR-PROCESSOR] Contours is not an array");
+            return [];
+        }
+        
+        return contours.filter(contour => contour !== null && contour !== undefined)
+            .map((contour, index) => {
+                // Handle contour being direct array of points
+                if (Array.isArray(contour) && contour.length > 0 && Array.isArray(contour[0])) {
+                    return {
+                        name: `Contour ${index}`,
+                        points: [...contour]
+                    };
+                }
+                
+                // Handle missing points property
+                if (!contour.points) {
+                    return {
+                        name: contour.name || `Contour ${index}`,
+                        points: []
+                    };
+                }
+                
+                // Handle points not being an array
+                if (!Array.isArray(contour.points)) {
+                    return {
+                        name: contour.name || `Contour ${index}`,
+                        points: []
+                    };
+                }
+                
+                // Valid contour, ensure name exists
+                return {
+                    name: contour.name || `Contour ${index}`,
+                    points: [...contour.points]
+                };
+            })
+            .filter(contour => contour.points.length >= 3);
+    };
+
+    // Protect against undefined points error
+    window.safeDrawContours = function(originalFunction) {
+        return function(contours, selectedIndex) {
+            if (!contours || !Array.isArray(contours) || contours.length === 0) {
+                console.warn("[CONTOUR-PROCESSOR] Attempted to draw empty contours");
+                return;
+            }
+            
+            const validContours = window.ensureValidContours(contours);
+            if (validContours.length === 0) {
+                console.warn("[CONTOUR-PROCESSOR] No valid contours to draw");
+                return;
+            }
+            
+            return originalFunction.call(this, validContours, selectedIndex);
+        };
+    };
+    </script>
+    <!-- Required for contour processing - Must be first -->
+    <script src="/ui/js/final-server-bypass.js"></script>
+    <script src="/ui/js/contour-verification.js"></script>
+
+    <!-- Core functionality -->
+    <script src="/ui/js/upload-fix.js"></script>
+    <script src="/ui/js/api-integration.js"></script>
+
+    <!-- Feature modules -->
+    <script src="/ui/js/mask-management.js"></script>
+    <script src="/ui/js/automatic-script-completion.js"></script>
+    <script src="/ui/js/batch-processing.js"></script>
+    <script src="/ui/js/integration.js"></script>
+    <script src="/ui/js/automatic-sam-contour-processor.js"></script>
+
+    <!-- Contour Editor - Last to override everything else -->
+    <script src="/ui/js/sam-contour-editor.js"></script>
+    
+    <!-- Script to check server version -->
+    <script>
+        // Protect all drawContours functions from undefined points error
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.drawContours) {
+                window.drawContours = window.safeDrawContours(window.drawContours);
+            }
+            
+            if (window.renderContours) {
+                window.renderContours = window.safeDrawContours(window.renderContours);
+            }
+            
+            // Fetch server version
+            fetch(window.location.origin + '/version')
+                .then(response => response.json())
+                .then(data => {
+                    const versionEl = document.getElementById('server-version');
+                    if (versionEl && data.version) {
+                        versionEl.textContent = data.version;
+                    }
+                })
+                .catch(error => console.warn('Could not fetch server version', error));
+        });
+    </script>
+
+<!-- Fix for contour display and SVG export -->
+<script src="/ui/js/contour-display-fix.js"></script>
+<!-- Unified contour visualization and editing system -->
+<script src="/ui/js/unified-contour-system.js"></script>
+</body>
+</html>
